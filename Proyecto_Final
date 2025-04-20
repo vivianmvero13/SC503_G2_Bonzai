@@ -1,8 +1,20 @@
+/* Correr con SYS
+CREATE USER USR_DB_DEV IDENTIFIED BY "dev1";
+/
+GRANT DBA TO USR_DB_DEV;
+*/
+
 ALTER SESSION SET "_ORACLE_SCRIPT"=TRUE;
 /
 
-/*--------------------------CREACION DE TABLESPACE----------------------------*/
--- Creacion del tablespace --
+/*==============================================================================
+==============================BASE DE DATOS BONZAI==============================
+==============================================================================*/
+
+
+/*==============================================================================
+===============================CREACION TABLESPACE==============================
+==============================================================================*/
 -- Tamaño inicial de 100M --
 -- Incrementa de 10M en 10M segun necesidad --
 -- Tamaño maximo de 500M --
@@ -15,15 +27,17 @@ CREATE TABLESPACE tbl_Bonzai
         COMMIT;
 /
 
-/*--------------------------CREACION DE PERFILES------------------------------*/
+/*==============================================================================
+================================CREACION PERFILES===============================
+==============================================================================*/
 CREATE PROFILE PERFIL_TERAPIA LIMIT 
 SESSIONS_PER_USER 3 
-CPU_PER_SESSION 10000 
-CPU_PER_CALL 1 
+CPU_PER_SESSION UNLIMITED 
+CPU_PER_CALL UNLIMITED 
 CONNECT_TIME UNLIMITED 
 IDLE_TIME 30 
-LOGICAL_READS_PER_SESSION DEFAULT 
-LOGICAL_READS_PER_CALL DEFAULT 
+LOGICAL_READS_PER_SESSION UNLIMITED 
+LOGICAL_READS_PER_CALL UNLIMITED 
 PRIVATE_SGA 20M 
 FAILED_LOGIN_ATTEMPTS 5 
 PASSWORD_LIFE_TIME 90 
@@ -34,8 +48,11 @@ PASSWORD_GRACE_TIME 5
 PASSWORD_VERIFY_FUNCTION NULL; 
 /
 
-/*----------------------CREACION DE USUARIOS Y ROLES--------------------------*/
+/*==============================================================================
+===========================CREACION USUARIOS Y ROLES============================
+==============================================================================*/
 
+--USER ADAM (ADMINISTRADOR)--
 CREATE USER USR_ADAM IDENTIFIED BY "ad1" 
 DEFAULT TABLESPACE tbl_Bonzai
 PROFILE PERFIL_TERAPIA              
@@ -45,10 +62,13 @@ QUOTA UNLIMITED ON tbl_Bonzai;
 GRANT CONNECT, RESOURCE TO USR_ADAM;
 /
 CREATE ROLE RL_ADMIN;
-GRANT CREATE SESSION, ALTER ANY TABLE, DELETE ANY TABLE, INSERT ANY TABLE, SELECT ANY TABLE TO RL_ADMIN;
+GRANT 
+        CREATE SESSION, CREATE USER, CREATE TRIGGER, ALTER ANY TABLE, 
+        DELETE ANY TABLE, INSERT ANY TABLE, SELECT ANY TABLE 
+TO RL_ADMIN;
 COMMIT;
 /
-
+--USER DIANA (DIRECTOR)--
 CREATE USER USR_DIANA IDENTIFIED BY "di1" 
 DEFAULT TABLESPACE tbl_Bonzai
 PROFILE PERFIL_TERAPIA
@@ -61,7 +81,7 @@ CREATE ROLE RL_DIRECTOR;
 GRANT CREATE SESSION, INSERT ANY TABLE, SELECT ANY TABLE TO RL_DIRECTOR; 
 COMMIT;
 /
-
+--USER TERRY (TERAPEUTA)--
 CREATE USER USR_TERRY IDENTIFIED BY "te1" 
 DEFAULT TABLESPACE tbl_Bonzai
 PROFILE PERFIL_TERAPIA
@@ -70,13 +90,11 @@ QUOTA UNLIMITED ON tbl_Bonzai;
 /
 GRANT CONNECT, RESOURCE TO USR_TERRY;
 /
-CREATE ROLE RL_TERAPEUTA;
-GRANT SELECT, INSERT ON USR_TERRY.EXPEDIENTES TO RL_TERAPEUTA; 
-GRANT SELECT, INSERT ON USR_TERRY.CITAS TO RL_TERAPEUTA; 
-COMMIT; 
-/
 
-/*----------------------CREACION DE TABLAS E INSERCIONES----------------------*/
+/*==============================================================================
+===========================CREACION TABLAS E INSERTS============================
+==============================================================================*/
+--CREACION TABLA CLIENTE--
 CREATE TABLE CLIENTE(
     ID_CLIENTE NUMBER(20)PRIMARY KEY,
     NOMBRE VARCHAR2(50)NOT NULL,
@@ -87,6 +105,7 @@ CREATE TABLE CLIENTE(
     VALORACION VARCHAR(50)
 );
 /
+--INSERTS TABLA CLIENTE--
 INSERT INTO CLIENTE (ID_CLIENTE, NOMBRE, APELLIDO, FECHA_NACIMIENTO, CONTACTO, DIRECCION, VALORACION)
 SELECT LEVEL,
        INITCAP(DBMS_RANDOM.STRING('L', 8)),
@@ -102,7 +121,7 @@ SELECT LEVEL,
 FROM DUAL
 CONNECT BY LEVEL <= 55;
 /
-
+--CREACION TABLA TERAPUETA--
 CREATE TABLE TERAPEUTA(
     ID_TERAPEUTA NUMBER(20)PRIMARY KEY,
     CODIGO_TERAPEUTA VARCHAR(20)NOT NULL,
@@ -112,6 +131,7 @@ CREATE TABLE TERAPEUTA(
     CONTACTO VARCHAR(15)
 ); 
 /
+--INSERTS TABLA TERAPEUTA--
 INSERT INTO TERAPEUTA (ID_TERAPEUTA, CODIGO_TERAPEUTA, NOMBRE, APELLIDO, ESPECIALIDAD, CONTACTO)
 SELECT LEVEL,
        'T-' || TRUNC(DBMS_RANDOM.VALUE(1000, 9999)),
@@ -126,7 +146,7 @@ SELECT LEVEL,
 FROM DUAL
 CONNECT BY LEVEL <= 55;
 /
-
+--CREACION TABLA TERAPIA--
 CREATE TABLE TERAPIA(
     ID_TERAPIA NUMBER(20)PRIMARY KEY,
     TIPO_TERAPIA VARCHAR(30),
@@ -134,6 +154,7 @@ CREATE TABLE TERAPIA(
     COSTO NUMBER(20)
 );  
 /
+--INSERTS TERAPIA--
 INSERT INTO TERAPIA (ID_TERAPIA, TIPO_TERAPIA, SESION, COSTO)
 SELECT LEVEL,
        CASE 
@@ -146,8 +167,7 @@ SELECT LEVEL,
 FROM DUAL
 CONNECT BY LEVEL <= 55;
 /
-SELECT * FROM terapeuta;
-
+--CREACION TABLA CITAS--
 CREATE TABLE CITAS(
     ID_CITA NUMBER(20)PRIMARY KEY,
     ID_CLIENTE NUMBER(20)REFERENCES CLIENTE(ID_CLIENTE),
@@ -157,6 +177,7 @@ CREATE TABLE CITAS(
     ESTADO VARCHAR2(100)
 );
 /
+--INSERTS TABLA CITAS--
 INSERT INTO CITAS (ID_CITA, ID_CLIENTE, ID_TERAPEUTA, FECHA_CITA, HORA_CITA, ESTADO)
 SELECT LEVEL,
        TRUNC(DBMS_RANDOM.VALUE(1, 54)),
@@ -171,7 +192,7 @@ SELECT LEVEL,
 FROM DUAL
 CONNECT BY LEVEL <= 100;
 /
-
+--CREACION TABLA PAGOS--
 CREATE TABLE PAGOS(
     ID_PAGO NUMBER(20)PRIMARY KEY,
     ID_CLIENTE NUMBER(20)REFERENCES CLIENTE(ID_CLIENTE),
@@ -181,6 +202,7 @@ CREATE TABLE PAGOS(
     ESTADO_PAGO VARCHAR(30)
 );
 /
+--INSERTS TABLA PAGOS--
 INSERT INTO PAGOS (ID_PAGO, ID_CLIENTE, MONTO, METODO_PAGO, FECHA_PAGO, ESTADO_PAGO)
 SELECT LEVEL,
        TRUNC(DBMS_RANDOM.VALUE(1, 54)),
@@ -199,7 +221,7 @@ SELECT LEVEL,
 FROM DUAL
 CONNECT BY LEVEL <= 100;
 /
-
+--CREACION TABLA EXPEDIENTES--
 CREATE TABLE EXPEDIENTES(
     ID_EXPEDIENTE NUMBER(20)PRIMARY KEY,
     ID_CLIENTE NUMBER(20)REFERENCES CLIENTE(ID_CLIENTE),
@@ -208,6 +230,7 @@ CREATE TABLE EXPEDIENTES(
     PROGRESO VARCHAR(50)
 );
 /
+--INSERTS TABLA EXPEDIENTES--
 INSERT INTO EXPEDIENTES (ID_EXPEDIENTE, ID_CLIENTE, FECHA, DESCRIPCION, PROGRESO)
 SELECT LEVEL,
        TRUNC(DBMS_RANDOM.VALUE(1, 54)),
@@ -224,6 +247,406 @@ CONNECT BY LEVEL <= 100;
 
 COMMIT;
 /
+
+---CREACION ROL TERAPEUTA--
+CREATE ROLE RL_TERAPEUTA;
+GRANT SELECT, INSERT ON USR_TERRY.EXPEDIENTES TO RL_TERAPEUTA; 
+GRANT SELECT, INSERT ON USR_TERRY.CITAS TO RL_TERAPEUTA; 
+/
+
+/*==============================================================================
+==========================CREACION TABLAS DE AUDITORIA==========================
+==============================================================================*/
+
+-- Tabla AUDITORIA_CLIENTE
+CREATE TABLE AUDITORIA_CLIENTE (
+    ID_CLIENTE NUMBER(20),
+    ACCION VARCHAR2(10),
+    FECHA_AUDITORIA DATE,
+    USUARIO VARCHAR2(100)
+);
+
+-- Tabla AUDITORIA_TERAPEUTA
+CREATE TABLE AUDITORIA_TERAPEUTA (
+    ID_TERAPEUTA NUMBER(20),
+    ACCION VARCHAR2(10),
+    FECHA_AUDITORIA DATE,
+    USUARIO VARCHAR2(100)
+);
+
+-- Tabla AUDITORIA_TERAPIA
+CREATE TABLE AUDITORIA_TERAPIA (
+    ID_TERAPIA NUMBER(20),
+    ACCION VARCHAR2(10),
+    FECHA_AUDITORIA DATE,
+    USUARIO VARCHAR2(100)
+);
+
+-- Tabla AUDITORIA_CITAS
+CREATE TABLE AUDITORIA_CITAS (
+    ID_CITA NUMBER(20),
+    ACCION VARCHAR2(10),
+    FECHA_AUDITORIA DATE,
+    USUARIO VARCHAR2(100)
+);
+
+-- Tabla AUDITORIA_PAGOS
+CREATE TABLE AUDITORIA_PAGOS (
+    ID_PAGO NUMBER(20),
+    ACCION VARCHAR2(10),
+    FECHA_AUDITORIA DATE,
+    USUARIO VARCHAR2(100)
+);
+
+-- Tabla AUDITORIA_EXPEDIENTES
+CREATE TABLE AUDITORIA_EXPEDIENTES (
+    ID_EXPEDIENTE NUMBER(20),
+    ACCION VARCHAR2(10),
+    FECHA_AUDITORIA DATE,
+    USUARIO VARCHAR2(100)
+);
+
+-- ===========================
+-- TRIGGERS DE AUDITORIA
+-- ===========================
+
+-- Triggers para CLIENTE
+CREATE OR REPLACE TRIGGER trg_auditoria_cliente_insert
+AFTER INSERT ON CLIENTE
+FOR EACH ROW
+BEGIN
+    INSERT INTO AUDITORIA_CLIENTE (
+        ID_CLIENTE,
+        ACCION,
+        FECHA_AUDITORIA,
+        USUARIO
+    ) VALUES (
+        :NEW.ID_CLIENTE,
+        'INSERT',
+        SYSDATE,
+        USER
+    );
+END;
+/
+
+CREATE OR REPLACE TRIGGER trg_auditoria_cliente_update
+AFTER UPDATE ON CLIENTE
+FOR EACH ROW
+BEGIN
+    INSERT INTO AUDITORIA_CLIENTE (
+        ID_CLIENTE,
+        ACCION,
+        FECHA_AUDITORIA,
+        USUARIO
+    ) VALUES (
+        :NEW.ID_CLIENTE,
+        'UPDATE',
+        SYSDATE,
+        USER
+    );
+END;
+/
+
+CREATE OR REPLACE TRIGGER trg_auditoria_cliente_delete
+AFTER DELETE ON CLIENTE
+FOR EACH ROW
+BEGIN
+    INSERT INTO AUDITORIA_CLIENTE (
+        ID_CLIENTE,
+        ACCION,
+        FECHA_AUDITORIA,
+        USUARIO
+    ) VALUES (
+        :OLD.ID_CLIENTE,
+        'DELETE',
+        SYSDATE,
+        USER
+    );
+END;
+/
+
+-- Triggers para TERAPEUTA
+CREATE OR REPLACE TRIGGER trg_auditoria_terapeuta_insert
+AFTER INSERT ON TERAPEUTA
+FOR EACH ROW
+BEGIN
+    INSERT INTO AUDITORIA_TERAPEUTA (
+        ID_TERAPEUTA,
+        ACCION,
+        FECHA_AUDITORIA,
+        USUARIO
+    ) VALUES (
+        :NEW.ID_TERAPEUTA,
+        'INSERT',
+        SYSDATE,
+        USER
+    );
+END;
+/
+
+CREATE OR REPLACE TRIGGER trg_auditoria_terapeuta_update
+AFTER UPDATE ON TERAPEUTA
+FOR EACH ROW
+BEGIN
+    INSERT INTO AUDITORIA_TERAPEUTA (
+        ID_TERAPEUTA,
+        ACCION,
+        FECHA_AUDITORIA,
+        USUARIO
+    ) VALUES (
+        :NEW.ID_TERAPEUTA,
+        'UPDATE',
+        SYSDATE,
+        USER
+    );
+END;
+/
+
+CREATE OR REPLACE TRIGGER trg_auditoria_terapeuta_delete
+AFTER DELETE ON TERAPEUTA
+FOR EACH ROW
+BEGIN
+    INSERT INTO AUDITORIA_TERAPEUTA (
+        ID_TERAPEUTA,
+        ACCION,
+        FECHA_AUDITORIA,
+        USUARIO
+    ) VALUES (
+        :OLD.ID_TERAPEUTA,
+        'DELETE',
+        SYSDATE,
+        USER
+    );
+END;
+/
+
+
+-- Trigger para INSERT en TERAPIA
+CREATE OR REPLACE TRIGGER trg_auditoria_terapia_insert
+AFTER INSERT ON TERAPIA
+FOR EACH ROW
+BEGIN
+    INSERT INTO AUDITORIA_TERAPIA (
+        ID_TERAPIA,
+        ACCION,
+        FECHA_AUDITORIA,
+        USUARIO
+    ) VALUES (
+        :NEW.ID_TERAPIA,
+        'INSERT',
+        SYSDATE,
+        USER
+    );
+END;
+/
+
+-- Trigger para UPDATE en TERAPIA
+CREATE OR REPLACE TRIGGER trg_auditoria_terapia_update
+AFTER UPDATE ON TERAPIA
+FOR EACH ROW
+BEGIN
+    INSERT INTO AUDITORIA_TERAPIA (
+        ID_TERAPIA,
+        ACCION,
+        FECHA_AUDITORIA,
+        USUARIO
+    ) VALUES (
+        :NEW.ID_TERAPIA,
+        'UPDATE',
+        SYSDATE,
+        USER
+    );
+END;
+/
+
+-- Trigger para DELETE en TERAPIA
+CREATE OR REPLACE TRIGGER trg_auditoria_terapia_delete
+AFTER DELETE ON TERAPIA
+FOR EACH ROW
+BEGIN
+    INSERT INTO AUDITORIA_TERAPIA (
+        ID_TERAPIA,
+        ACCION,
+        FECHA_AUDITORIA,
+        USUARIO
+    ) VALUES (
+        :OLD.ID_TERAPIA,
+        'DELETE',
+        SYSDATE,
+        USER
+    );
+END;
+/
+
+-- Trigger para INSERT en CITAS
+CREATE OR REPLACE TRIGGER trg_auditoria_citas_insert
+AFTER INSERT ON CITAS
+FOR EACH ROW
+BEGIN
+    INSERT INTO AUDITORIA_CITAS (
+        ID_CITA,
+        ACCION,
+        FECHA_AUDITORIA,
+        USUARIO
+    ) VALUES (
+        :NEW.ID_CITA,
+        'INSERT',
+        SYSDATE,
+        USER
+    );
+END;
+/
+
+-- Trigger para UPDATE en CITAS
+CREATE OR REPLACE TRIGGER trg_auditoria_citas_update
+AFTER UPDATE ON CITAS
+FOR EACH ROW
+BEGIN
+    INSERT INTO AUDITORIA_CITAS (
+        ID_CITA,
+        ACCION,
+        FECHA_AUDITORIA,
+        USUARIO
+    ) VALUES (
+        :NEW.ID_CITA,
+        'UPDATE',
+        SYSDATE,
+        USER
+    );
+END;
+/
+
+-- Trigger para DELETE en CITAS
+CREATE OR REPLACE TRIGGER trg_auditoria_citas_delete
+AFTER DELETE ON CITAS
+FOR EACH ROW
+BEGIN
+    INSERT INTO AUDITORIA_CITAS (
+        ID_CITA,
+        ACCION,
+        FECHA_AUDITORIA,
+        USUARIO
+    ) VALUES (
+        :OLD.ID_CITA,
+        'DELETE',
+        SYSDATE,
+        USER
+    );
+END;
+/
+
+-- Trigger para INSERT en PAGOS
+CREATE OR REPLACE TRIGGER trg_auditoria_pagos_insert
+AFTER INSERT ON PAGOS
+FOR EACH ROW
+BEGIN
+    INSERT INTO AUDITORIA_PAGOS (
+        ID_PAGO,
+        ACCION,
+        FECHA_AUDITORIA,
+        USUARIO
+    ) VALUES (
+        :NEW.ID_PAGO,
+        'INSERT',
+        SYSDATE,
+        USER
+    );
+END;
+/
+
+-- Trigger para UPDATE en PAGOS
+CREATE OR REPLACE TRIGGER trg_auditoria_pagos_update
+AFTER UPDATE ON PAGOS
+FOR EACH ROW
+BEGIN
+    INSERT INTO AUDITORIA_PAGOS (
+        ID_PAGO,
+        ACCION,
+        FECHA_AUDITORIA,
+        USUARIO
+    ) VALUES (
+        :NEW.ID_PAGO,
+        'UPDATE',
+        SYSDATE,
+        USER
+    );
+END;
+/
+
+-- Trigger para DELETE en PAGOS
+CREATE OR REPLACE TRIGGER trg_auditoria_pagos_delete
+AFTER DELETE ON PAGOS
+FOR EACH ROW
+BEGIN
+    INSERT INTO AUDITORIA_PAGOS (
+        ID_PAGO,
+        ACCION,
+        FECHA_AUDITORIA,
+        USUARIO
+    ) VALUES (
+        :OLD.ID_PAGO,
+        'DELETE',
+        SYSDATE,
+        USER
+    );
+END;
+/
+
+-- Trigger para INSERT en EXPEDIENTES
+CREATE OR REPLACE TRIGGER trg_auditoria_expedientes_insert
+AFTER INSERT ON EXPEDIENTES
+FOR EACH ROW
+BEGIN
+    INSERT INTO AUDITORIA_EXPEDIENTES (
+        ID_EXPEDIENTE,
+        ACCION,
+        FECHA_AUDITORIA,
+        USUARIO
+    ) VALUES (
+        :NEW.ID_EXPEDIENTE,
+        'INSERT',
+        SYSDATE,
+        USER
+    );
+END;
+/
+
+-- Trigger para UPDATE en EXPEDIENTES
+CREATE OR REPLACE TRIGGER trg_auditoria_expedientes_update
+AFTER UPDATE ON EXPEDIENTES
+FOR EACH ROW
+BEGIN
+    INSERT INTO AUDITORIA_EXPEDIENTES (
+        ID_EXPEDIENTE,
+        ACCION,
+        FECHA_AUDITORIA,
+        USUARIO
+    ) VALUES (
+        :NEW.ID_EXPEDIENTE,
+        'UPDATE',
+        SYSDATE,
+        USER
+    );
+END;
+/
+
+-- Trigger para DELETE en EXPEDIENTES
+CREATE OR REPLACE TRIGGER trg_auditoria_expedientes_delete
+AFTER DELETE ON EXPEDIENTES
+FOR EACH ROW
+BEGIN
+    INSERT INTO AUDITORIA_EXPEDIENTES (
+        ID_EXPEDIENTE,
+        ACCION,
+        FECHA_AUDITORIA,
+        USUARIO
+    ) VALUES (
+        :OLD.ID_EXPEDIENTE,
+        'DELETE',
+        SYSDATE,
+        USER
+    );
+END;
 
 /*-----------------------------CREACION DE INDICES----------------------------*/
 CREATE INDEX IDX_CLIENTE_NOMBRE ON CLIENTE(NOMBRE); 
