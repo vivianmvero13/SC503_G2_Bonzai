@@ -192,6 +192,7 @@ SELECT LEVEL,
 FROM DUAL
 CONNECT BY LEVEL <= 100;
 /
+
 --CREACION TABLA PAGOS--
 CREATE TABLE PAGOS(
     ID_PAGO NUMBER(20)PRIMARY KEY,
@@ -250,8 +251,8 @@ COMMIT;
 
 ---CREACION ROL TERAPEUTA--
 CREATE ROLE RL_TERAPEUTA;
-GRANT SELECT, INSERT ON USR_TERRY.EXPEDIENTES TO RL_TERAPEUTA; 
-GRANT SELECT, INSERT ON USR_TERRY.CITAS TO RL_TERAPEUTA; 
+GRANT SELECT, INSERT ON USR_ADAM.EXPEDIENTES TO RL_TERAPEUTA; 
+GRANT SELECT, INSERT ON USR_ADAM.CITAS TO RL_TERAPEUTA; 
 /
 
 /*==============================================================================
@@ -648,13 +649,18 @@ BEGIN
     );
 END;
 
-/*-----------------------------CREACION DE INDICES----------------------------*/
+/*==============================================================================
+===========================CREACION TABLAS DE INDICES===========================
+==============================================================================*/
+
 CREATE INDEX IDX_CLIENTE_NOMBRE ON CLIENTE(NOMBRE); 
 CREATE INDEX IDX_CITA_FECHA ON CITAS(FECHA_CITA); 
 CREATE INDEX IDX_PAGO_CLIENTE ON PAGOS(ID_CLIENTE); 
 /
 
-/*----------------------DEFINICION DE PERMISOS Y ACCESOS----------------------*/
+/*==============================================================================
+==========================DEFINICION PERMISOS Y ACCESOS*========================
+==============================================================================*/
 -- RL_ADMIN
 GRANT ALL PRIVILEGES ON CLIENTE TO RL_ADMIN;
 GRANT ALL PRIVILEGES ON TERAPEUTA TO RL_ADMIN;
@@ -663,13 +669,15 @@ GRANT ALL PRIVILEGES ON CITAS TO RL_ADMIN;
 GRANT ALL PRIVILEGES ON PAGOS TO RL_ADMIN;
 GRANT ALL PRIVILEGES ON EXPEDIENTES TO RL_ADMIN;
 GRANT CREATE SESSION, CREATE TABLE, CREATE VIEW, CREATE PROCEDURE,
-      CREATE SEQUENCE, CREATE TRIGGER TO RL_ADMIN;
+CREATE SEQUENCE, CREATE TRIGGER TO RL_ADMIN;
+GRANT RL_ADMIN TO USR_ADAM;
+COMMIT;
 /
-
 -- RL_TERAPEUTA
 GRANT SELECT, INSERT ON CITAS TO RL_TERAPEUTA;
 GRANT SELECT, INSERT ON EXPEDIENTES TO RL_TERAPEUTA;
 GRANT RL_TERAPEUTA TO USR_TERRY;
+COMMIT;
 /
 
 -- RL_DIRECTOR
@@ -682,3 +690,49 @@ GRANT SELECT ON EXPEDIENTES TO RL_DIRECTOR;
 GRANT CREATE SESSION TO RL_DIRECTOR;
 GRANT RL_DIRECTOR TO USR_DIANA;
 /
+
+/*==============================================================================
+======================================PRUEBAS===================================
+==============================================================================*/
+--Verificar roles 
+--SELECT * FROM SESSION_ROLES;
+--Si falta el rol, seteo manual
+--SET ROLE RL_DIRECTOR;
+
+-- ROL TERAPEUTA --
+SET ROLE RL_TERAPEUTA;
+SELECT * FROM USR_ADAM.CITAS;
+SELECT * FROM USR_ADAM.EXPEDIENTES;
+SELECT * FROM USR_ADAM.PAGOS;
+
+INSERT INTO USR_ADAM.CLIENTE (
+    ID_CLIENTE,
+    NOMBRE,
+    APELLIDO,
+    FECHA_NACIMIENTO,
+    CONTACTO,
+    DIRECCION,
+    VALORACION
+) VALUES (
+    999,
+    'Juan',
+    'Perez',
+    TO_DATE('1990-05-15', 'YYYY-MM-DD'),
+    '+506 600000000',
+    'Calle 1 #10',
+    'Categoria-A'
+);
+
+
+
+-- ROL DIRECTOR --
+SET ROLE RL_DIRECTOR;
+SELECT * FROM USR_ADAM.CLIENTE;
+SELECT * FROM USR_ADAM.EXPEDIENTES;
+SELECT * FROM USR_ADAM.PAGOS;
+
+-- ROL ADMINISTRADOR --
+SET ROLE RL_ADMIN;
+SELECT * FROM USR_ADAM.CLIENTE;
+SELECT * FROM USR_ADAM.EXPEDIENTES;
+SELECT * FROM USR_ADAM.PAGOS;
