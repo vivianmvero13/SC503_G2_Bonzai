@@ -104,6 +104,7 @@ CREATE TABLE CLIENTE(
     DIRECCION VARCHAR(50),
     VALORACION VARCHAR(50)
 );
+COMMIT;
 /
 --INSERTS TABLA CLIENTE--
 INSERT INTO CLIENTE (ID_CLIENTE, NOMBRE, APELLIDO, FECHA_NACIMIENTO, CONTACTO, DIRECCION, VALORACION)
@@ -668,8 +669,10 @@ GRANT ALL PRIVILEGES ON TERAPIA TO RL_ADMIN;
 GRANT ALL PRIVILEGES ON CITAS TO RL_ADMIN;
 GRANT ALL PRIVILEGES ON PAGOS TO RL_ADMIN;
 GRANT ALL PRIVILEGES ON EXPEDIENTES TO RL_ADMIN;
+GRANT EXECUTE ON DBMS_CRYPTO TO RL_ADMIN;
 GRANT CREATE SESSION, CREATE TABLE, CREATE VIEW, CREATE PROCEDURE,
 CREATE SEQUENCE, CREATE TRIGGER TO RL_ADMIN;
+GRANT EXECUTE ON DBMS_CRYPTO TO RL_ADMIN;
 GRANT RL_ADMIN TO USR_ADAM;
 COMMIT;
 /
@@ -691,48 +694,388 @@ GRANT CREATE SESSION TO RL_DIRECTOR;
 GRANT RL_DIRECTOR TO USR_DIANA;
 /
 
+/*
+================================================================================
+================== PLAN DE RESPALDOS Y RECUPERACION DE DATOS ===================
+================================================================================
+
+*/
+
+/*==============================================================================
+============================= VISTAS MATERIALIZADAS ============================
+==============================================================================*/
+CREATE MATERIALIZED VIEW CONTEO_CITAS_CLIENTE_MV
+BUILD IMMEDIATE
+REFRESH COMPLETE ON DEMAND
+AS
+SELECT
+    c.id_cliente,
+    c.nombre AS NombreCliente,
+    c.apellido AS ApellidosCliente,
+    COUNT(ci.id_cita) AS TotalCitas
+FROM
+    CLIENTE c
+JOIN
+    CITAS ci ON c.id_cliente = ci.id_cliente
+GROUP BY
+    c.id_cliente, c.nombre, c.apellido;
+/
+-- Consultar vista materializada
+SELECT * FROM CONTEO_CITAS_CLIENTE_MV;
+/
+
+-- 2. Ingresos por terapeuta
+CREATE MATERIALIZED VIEW INGRESOS_POR_TERAPEUTA_MV
+BUILD IMMEDIATE
+REFRESH COMPLETE ON DEMAND
+AS
+SELECT
+    t.id_terapeuta,
+    t.nombre AS NombrTerapeuta,
+    t.apellido AS ApellidosTerapeuta,
+    SUM(p.monto) AS IngresosTotales
+FROM
+    TERAPEUTA t
+JOIN
+    CITAS c ON t.id_terapeuta = c.id_terapeuta
+JOIN
+    PAGOS p ON c.id_cliente = p.id_cliente
+GROUP BY
+    t.id_terapeuta, t.nombre, t.apellido;
+
+-- Consultar vista materializada
+SELECT * FROM system.INGRESOS_POR_TERAPEUTA_MV;
+
+
+-- 3. Resumen de expedientes por cliente
+CREATE MATERIALIZED VIEW RESUMEN_EXPEDIENTES_CLIENTE_MV
+BUILD IMMEDIATE
+REFRESH COMPLETE ON DEMAND
+AS
+SELECT
+    c.id_cliente,
+    c.nombre AS NombreCliente,
+    c.apellido AS ApellidosCliente,
+    COUNT(e.id_expediente) AS TotalExpedientes
+FROM
+    CLIENTE c
+LEFT JOIN
+    EXPEDIENTES e ON c.id_cliente = e.id_cliente
+GROUP BY
+    c.id_cliente, c.nombre, c.apellido;
+
+-- Consultar vista materializada
+SELECT * FROM system.RESUMEN_EXPEDIENTES_CLIENTE_MV;
+
+
+
+/*==============================================================================
+=============================== DESNORMALIZACION ===============================
+==============================================================================*/
+-- 1. Anadir nombre del cliente a la tabla Pagos
+ALTER TABLE PAGOS
+ADD (nombre_cliente VARCHAR2(100), apellidos_cliente VARCHAR2(100));
+
+/* Se necesitará un trigger para mantener las columnas actualizadas cuando se 
+insertan nuevos pagos o se modifican los cliente. */
+CREATE OR REPLACE TRIGGER PAGOS_ACTUALIZAR_CLIENTE_TRG
+BEFORE INSERT OR UPDATE ON PAGOS
+FOR EACH ROW
+DECLARE
+    v_nombre_cliente cliente.nombre%TYPE;
+    v_apellidos_cliente cliente.apellido%TYPE;
+BEGIN
+    SELECT nombre, apellido
+    INTO v_nombre_cliente, v_apellidos_cliente
+    FROM CLIENTE
+    WHERE id_cliente = :NEW.id_cliente;
+
+    :NEW.nombre_cliente := v_nombre_cliente;
+    :NEW.apellidos_cliente := v_apellidos_cliente;
+END;
+/
+
+-- Anadir nombre del terapeuta a la tabla citas
+ALTER TABLE CITAS
+ADD (nombre_terapeuta VARCHAR2(100), apellidos_terapeuta VARCHAR2(100));
+
+-- Trigger para mantener estas columnas actualizadas:
+CREATE OR REPLACE TRIGGER CITAS_ACTUALIZAR_TERAPEUTA_TRG
+BEFORE INSERT OR UPDATE ON CITAS
+FOR EACH ROW
+DECLARE
+    v_nombre_terapeuta terapeuta.nombre%TYPE;
+    v_apellidos_terapeuta terapeuta.apellido%TYPE;
+BEGIN
+    SELECT nombre, apellido
+    INTO v_nombre_terapeuta, v_apellidos_terapeuta
+    FROM TERAPEUTA
+    WHERE id_terapeuta = :NEW.id_terapeuta;
+
+    :NEW.nombre_terapeuta := v_nombre_terapeuta;
+    :NEW.apellidos_terapeuta := v_apellidos_terapeuta;
+END;
+/
+
+/*==============================================================================
+================================SEGURIDAD DE DATOS==============================
+==============================================================================*/
+DECLARE
+    l_key        RAW(32) := UTL_RAW.CAST_TO_RAW('1234567890ABCDEF1234567890ABCDEF'); -- Clave AES-256
+    l_data       VARCHAR2(32767) := 'Contacto del cliente'; -- Dato sensible a cifrar
+    l_encrypted  RAW(32767);
+BEGIN
+    l_encrypted := DBMS_CRYPTO.ENCRYPT(
+        src => UTL_RAW.CAST_TO_RAW(l_data),
+        typ => DBMS_CRYPTO.ENCRYPT_AES256 + DBMS_CRYPTO.CHAIN_CBC + DBMS_CRYPTO.PAD_PKCS5,
+        key => l_key
+    );
+
+    UPDATE CLIENTE
+    SET contacto = UTL_RAW.CAST_TO_VARCHAR2(l_encrypted)
+    WHERE id_cliente = 1;
+
+    COMMIT;
+END;
+/
+
+--Descifrado de Datos
+DECLARE
+    l_key         RAW(32) := UTL_RAW.CAST_TO_RAW('1234567890ABCDEF1234567890ABCDEF'); -- La misma clave
+    l_encrypted   RAW(32767);
+    l_decrypted   RAW(32767);
+    l_decrypted_v VARCHAR2(32767);
+BEGIN
+    SELECT UTL_RAW.CAST_TO_RAW(contacto)
+    INTO l_encrypted
+    FROM CLIENTE
+    WHERE id_cliente = 1;
+
+    l_decrypted := DBMS_CRYPTO.DECRYPT(
+        src => l_encrypted,
+        typ => DBMS_CRYPTO.ENCRYPT_AES256 + DBMS_CRYPTO.CHAIN_CBC + DBMS_CRYPTO.PAD_PKCS5,
+        key => l_key
+    );
+
+    l_decrypted_v := UTL_RAW.CAST_TO_VARCHAR2(l_decrypted);
+
+    DBMS_OUTPUT.PUT_LINE('Contacto descifrado: ' || l_decrypted_v);
+END;
+/
+SELECT * FROM CLIENTE;
+
+--- TABLA terapeuta -------------------------------------------------------------
+--Cifrado de datos
+DECLARE
+    l_key        RAW(32) := UTL_RAW.CAST_TO_RAW('1234567890ABCDEF1234567890ABCDEF'); -- Clave AES-256
+    l_data       VARCHAR2(32767) := 'Contacto del terapeuta'; -- Dato sensible a cifrar
+    l_encrypted  RAW(32767);
+BEGIN
+    l_encrypted := DBMS_CRYPTO.ENCRYPT(
+        src => UTL_RAW.CAST_TO_RAW(l_data),
+        typ => DBMS_CRYPTO.ENCRYPT_AES256 + DBMS_CRYPTO.CHAIN_CBC + DBMS_CRYPTO.PAD_PKCS5,
+        key => l_key
+    );
+
+    UPDATE terapeuta
+    SET contacto = UTL_RAW.CAST_TO_VARCHAR2(l_encrypted)
+    WHERE id_terapeuta = 5;
+
+    COMMIT;
+END;
+/
+
+--Descifrado de Datos
+DECLARE
+    l_key         RAW(32) := UTL_RAW.CAST_TO_RAW('1234567890ABCDEF1234567890ABCDEF'); -- La misma clave
+    l_encrypted   RAW(32767);
+    l_decrypted   RAW(32767);
+    l_decrypted_v VARCHAR2(32767);
+BEGIN
+    SELECT UTL_RAW.CAST_TO_RAW(contacto)
+    INTO l_encrypted
+    FROM terapeuta
+    WHERE id_terapeuta = 5;
+
+    l_decrypted := DBMS_CRYPTO.DECRYPT(
+        src => l_encrypted,
+        typ => DBMS_CRYPTO.ENCRYPT_AES256 + DBMS_CRYPTO.CHAIN_CBC + DBMS_CRYPTO.PAD_PKCS5,
+        key => l_key
+    );
+
+    l_decrypted_v := UTL_RAW.CAST_TO_VARCHAR2(l_decrypted);
+
+    DBMS_OUTPUT.PUT_LINE('Contacto descifrado: ' || l_decrypted_v);
+END;
+/
+SELECT * FROM terapeuta;
+
+--- TABLA EXPEDIENTES -------------------------------------------------------------
+--Cifrado de datos
+DECLARE
+    l_key        RAW(32) := UTL_RAW.CAST_TO_RAW('1234567890ABCDEF1234567890ABCDEF'); -- Clave AES-256
+    l_data       VARCHAR2(32767) := 'Descripción del expediente'; -- Dato sensible a cifrar
+    l_encrypted  RAW(32767);
+BEGIN
+    l_encrypted := DBMS_CRYPTO.ENCRYPT(
+        src => UTL_RAW.CAST_TO_RAW(l_data),
+        typ => DBMS_CRYPTO.ENCRYPT_AES256 + DBMS_CRYPTO.CHAIN_CBC + DBMS_CRYPTO.PAD_PKCS5,
+        key => l_key
+    );
+
+    UPDATE EXPEDIENTES
+    SET descripcion = UTL_RAW.CAST_TO_VARCHAR2(l_encrypted)
+    WHERE id_expediente = 8;
+
+    COMMIT;
+END;
+/
+
+--Descifrado de Datos
+DECLARE
+    l_key         RAW(32) := UTL_RAW.CAST_TO_RAW('1234567890ABCDEF1234567890ABCDEF'); -- La misma clave
+    l_encrypted   RAW(32767);
+    l_decrypted   RAW(32767);
+    l_decrypted_v VARCHAR2(32767);
+BEGIN
+    SELECT UTL_RAW.CAST_TO_RAW(descripcion)
+    INTO l_encrypted
+    FROM EXPEDIENTES
+    WHERE id_expediente = 8;
+
+    l_decrypted := DBMS_CRYPTO.DECRYPT(
+        src => l_encrypted,
+        typ => DBMS_CRYPTO.ENCRYPT_AES256 + DBMS_CRYPTO.CHAIN_CBC + DBMS_CRYPTO.PAD_PKCS5,
+        key => l_key
+    );
+
+    l_decrypted_v := UTL_RAW.CAST_TO_VARCHAR2(l_decrypted);
+
+    DBMS_OUTPUT.PUT_LINE('Descripción descifrada: ' || l_decrypted_v);
+END;
+/
+SELECT * FROM EXPEDIENTES;
+
+--- TABLA PAGOS -------------------------------------------------------------
+--Cifrado de datos
+DECLARE
+    l_key        RAW(32) := UTL_RAW.CAST_TO_RAW('1234567890ABCDEF1234567890ABCDEF'); -- Clave AES-256
+    l_data       VARCHAR2(32767) := 'Método de pago'; -- Dato sensible a cifrar
+    l_encrypted  RAW(32767);
+BEGIN
+    l_encrypted := DBMS_CRYPTO.ENCRYPT(
+        src => UTL_RAW.CAST_TO_RAW(l_data),
+        typ => DBMS_CRYPTO.ENCRYPT_AES256 + DBMS_CRYPTO.CHAIN_CBC + DBMS_CRYPTO.PAD_PKCS5,
+        key => l_key
+    );
+
+    UPDATE PAGOS
+    SET metodo_pago = UTL_RAW.CAST_TO_VARCHAR2(l_encrypted)
+    WHERE id_pago = 24;
+
+    COMMIT;
+END;
+/
+
+--Descifrado de Datos
+DECLARE
+    l_key         RAW(32) := UTL_RAW.CAST_TO_RAW('1234567890ABCDEF1234567890ABCDEF'); -- La misma clave
+    l_encrypted   RAW(32767);
+    l_decrypted   RAW(32767);
+    l_decrypted_v VARCHAR2(32767);
+BEGIN
+    SELECT UTL_RAW.CAST_TO_RAW(metodo_pago)
+    INTO l_encrypted
+    FROM PAGOS
+    WHERE id_pago = 24;
+
+    l_decrypted := DBMS_CRYPTO.DECRYPT(
+        src => l_encrypted,
+        typ => DBMS_CRYPTO.ENCRYPT_AES256 + DBMS_CRYPTO.CHAIN_CBC + DBMS_CRYPTO.PAD_PKCS5,
+        key => l_key
+    );
+
+    l_decrypted_v := UTL_RAW.CAST_TO_VARCHAR2(l_decrypted);
+
+    DBMS_OUTPUT.PUT_LINE('Método de pago descifrado: ' || l_decrypted_v);
+END;
+/
+
+SELECT * FROM PAGOS;
+
+
 /*==============================================================================
 ======================================PRUEBAS===================================
 ==============================================================================*/
---Verificar roles 
---SELECT * FROM SESSION_ROLES;
---Si falta el rol, seteo manual
---SET ROLE RL_DIRECTOR;
+/*==============================================================================
+======================================PRUEBAS===================================
+==============================================================================*/
 
--- ROL TERAPEUTA --
+/*==============================
+== VERIFICACIÓN DE ROLES ==
+==============================*/
+-- Verificar los roles asignados
+SELECT * FROM SESSION_ROLES;
+
+-- Seteo manual si no está activo
+-- SET ROLE RL_ADMIN;
+-- SET ROLE RL_DIRECTOR;
+-- SET ROLE RL_TERAPEUTA;
+
+/*==============================
+== ROL TERAPEUTA ==
+==============================*/
 SET ROLE RL_TERAPEUTA;
-SELECT * FROM USR_ADAM.CITAS;
-SELECT * FROM USR_ADAM.EXPEDIENTES;
+
+-- Lectura permitida
+SELECT * FROM USR_ADAM.CITAS WHERE ROWNUM <= 3;
+SELECT * FROM USR_ADAM.EXPEDIENTES WHERE ROWNUM <= 3;
+
+-- No tiene acceso a CLIENTE ni PAGOS (validar error esperado)
+SELECT * FROM USR_ADAM.CLIENTE;
 SELECT * FROM USR_ADAM.PAGOS;
+/
 
-INSERT INTO USR_ADAM.CLIENTE (
-    ID_CLIENTE,
-    NOMBRE,
-    APELLIDO,
-    FECHA_NACIMIENTO,
-    CONTACTO,
-    DIRECCION,
-    VALORACION
-) VALUES (
-    999,
-    'Juan',
-    'Perez',
-    TO_DATE('1990-05-15', 'YYYY-MM-DD'),
-    '+506 600000000',
-    'Calle 1 #10',
-    'Categoria-A'
-);
-
-
-
--- ROL DIRECTOR --
+/*==============================
+== ROL DIRECTOR ==
+==============================*/
 SET ROLE RL_DIRECTOR;
-SELECT * FROM USR_ADAM.CLIENTE;
-SELECT * FROM USR_ADAM.EXPEDIENTES;
-SELECT * FROM USR_ADAM.PAGOS;
 
--- ROL ADMINISTRADOR --
+-- Acceso de solo lectura
+SELECT * FROM USR_ADAM.CLIENTE WHERE ROWNUM <= 3;
+SELECT * FROM USR_ADAM.EXPEDIENTES WHERE ROWNUM <= 3;
+SELECT * FROM USR_ADAM.PAGOS WHERE ROWNUM <= 3;
+
+-- Validar que no puede insertar
+INSERT INTO USR_ADAM.CLIENTE (
+      ID_CLIENTE, NOMBRE, APELLIDO, FECHA_NACIMIENTO, CONTACTO, DIRECCION, VALORACION
+  ) VALUES (
+      123, 'Ana', 'Lopez', TO_DATE('1995-08-22', 'YYYY-MM-DD'),
+      '+506 600000001', 'Calle 2', 'Categoria-B'
+  );
+/
+
+/*==============================
+== ROL ADMINISTRADOR ==
+==============================*/
 SET ROLE RL_ADMIN;
-SELECT * FROM USR_ADAM.CLIENTE;
-SELECT * FROM USR_ADAM.EXPEDIENTES;
-SELECT * FROM USR_ADAM.PAGOS;
+
+-- Acceso total
+SELECT * FROM USR_ADAM.CLIENTE WHERE ROWNUM <= 3;
+SELECT * FROM USR_ADAM.EXPEDIENTES WHERE ROWNUM <= 3;
+SELECT * FROM USR_ADAM.PAGOS WHERE ROWNUM <= 3;
+
+-- Insertar nuevo cliente
+INSERT INTO USR_ADAM.CLIENTE (
+    ID_CLIENTE, NOMBRE, APELLIDO, FECHA_NACIMIENTO, CONTACTO, DIRECCION, VALORACION
+) VALUES (
+    997, 'Carlos', 'Ramirez', TO_DATE('1988-11-10', 'YYYY-MM-DD'),
+    '+506 600000002', 'Calle 3', 'Categoria-C'
+);
+COMMIT;
+
+/*==============================
+== VERIFICACIÓN DE AUDITORIA ==
+==============================*/
+SELECT * FROM USR_ADAM.AUDITORIA_CLIENTE WHERE ID_CLIENTE IN (997, 998, 999);
+
