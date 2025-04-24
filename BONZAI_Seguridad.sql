@@ -23,7 +23,7 @@ BEGIN
         key => l_key
     );
 
-    UPDATE CLIENTES
+    UPDATE CLIENTE
     SET contacto = UTL_RAW.CAST_TO_VARCHAR2(l_encrypted)
     WHERE id_cliente = 1;
 
